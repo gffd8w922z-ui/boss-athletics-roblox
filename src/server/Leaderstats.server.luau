@@ -1,19 +1,46 @@
 --[[
 	Leaderstats.server
-	Starts the Phase 1 leaderstats system when players join BOSS Athletics.
-	The stat creation logic is kept in LeaderstatsService so this script stays small.
+	Starts the leaderstats and Phase 3 player data saving systems for BOSS Athletics.
+	Stats are loaded when players join and saved when players leave or the server shuts down.
 ]]
 
 local Players = game:GetService("Players")
 
 local LeaderstatsService = require(script.Parent.LeaderstatsService)
+local PlayerDataService = require(script.Parent.PlayerDataService)
 
--- Create leaderstats for each new player.
+-- Load saved stats, then create leaderstats for each new player.
 Players.PlayerAdded:Connect(function(player: Player)
-	LeaderstatsService.createLeaderstats(player)
+	local savedStats = PlayerDataService.loadStats(player)
+	LeaderstatsService.createLeaderstats(player, savedStats)
 end)
 
--- Create leaderstats for any players already present during Studio test startup.
-for _, player in ipairs(Players:GetPlayers()) do
-	LeaderstatsService.createLeaderstats(player)
+-- Save a player's current stats without blocking the rest of the game if saving fails.
+local function savePlayerStats(player: Player)
+	local statsSnapshot = LeaderstatsService.getStatsSnapshot(player)
+	local didSave = PlayerDataService.saveStats(player, statsSnapshot)
+
+	if not didSave then
+		warn(`BOSS Athletics stats were not saved for {player.Name}. The player can continue playing, but progress from this server may be lost.`)
+	end
 end
+
+-- Save player stats when they leave the server.
+Players.PlayerRemoving:Connect(function(player: Player)
+	savePlayerStats(player)
+end)
+
+-- Covers players already present if this script starts after they load in Studio.
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(function()
+		local savedStats = PlayerDataService.loadStats(player)
+		LeaderstatsService.createLeaderstats(player, savedStats)
+	end)
+end
+
+-- Save remaining players during shutdown.
+game:BindToClose(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		savePlayerStats(player)
+	end
+end)
